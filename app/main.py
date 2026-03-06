@@ -13,8 +13,7 @@ from dash import Dash, dcc, html, Input, Output, callback
 DATA_PATH = os.path.join(os.path.dirname(__file__), "..", "data", "breeds.csv")
 df = pd.read_csv(DATA_PATH)
 
-# Fill NaN for filter columns so dropdowns work
-df["bred_for"] = df["bred_for"].fillna("Unknown")
+
 df["breed_group"] = df["breed_group"].fillna("Unknown")
 df["country_code"] = df["country_code"].fillna("Unknown")
 
@@ -24,11 +23,37 @@ def parse_metric_to_midpoint(s: str) -> float | None:
     if pd.isna(s) or not str(s).strip():
         return None
     s = str(s)
-    # Extract first X-Y pattern (handles "3.2-4.5" or "Male: 25-30; Female: 20-25")
     match = re.search(r"(\d+\.?\d*)\s*-\s*(\d+\.?\d*)", s)
     if match:
         lo, hi = float(match.group(1)), float(match.group(2))
         return (lo + hi) / 2
+    return None
+
+
+# Color palette for charts (warm, dog-friendly tones)
+PALETTE = [
+    "#E8A87C",  # terracotta
+    "#41B3A3",  # teal
+    "#C38D9E",  # dusty rose
+    "#85CDCA",  # mint
+    "#E27D60",  # coral
+    "#85C1E9",  # sky blue
+    "#BB8FCE",  # lavender
+    "#F7DC6F",  # golden
+    "#52B788",  # sage
+    "#DDA0DD",  # plum
+    "#F8B739",  # amber
+]
+
+
+def parse_life_span_range(s: str) -> tuple[float, float] | None:
+    """Parse life span string (e.g. '12-15', '10-12 years') to (min, max)."""
+    if pd.isna(s) or not str(s).strip():
+        return None
+    match = re.search(r"(\d+\.?\d*)\s*-\s*(\d+\.?\d*)", str(s))
+    if match:
+        lo, hi = float(match.group(1)), float(match.group(2))
+        return (lo, hi)
     return None
 
 
@@ -38,7 +63,7 @@ app.layout = html.Div(
     [
         html.H1("Dog Breeds Dashboard", style={"textAlign": "center", "marginBottom": "0.5rem"}),
         html.P(
-            "Explore dog breeds from The Dog API. Search for a specific breed or filter and compare breeds by group, origin, and purpose.",
+            "Explore dog breeds from The Dog API. Search for a specific breed or explore by country or breed group.",
             style={"textAlign": "center", "color": "#666", "marginBottom": "1.5rem"},
         ),
         dcc.Tabs(
@@ -75,77 +100,70 @@ app.layout = html.Div(
                     ],
                 ),
                 dcc.Tab(
-                    label="Explore & Compare",
-                    value="explore",
+                    label="Explore by Country",
+                    value="explore-country",
                     children=[
                         html.Div(
                             [
                                 html.P(
-                                    "Filter breeds by purpose, breed group, or country. Charts update based on your selection.",
+                                    "Filter breeds by country. Bar and pie charts show breed group breakdown for the selected country.",
                                     style={"marginBottom": "1rem"},
                                 ),
                                 html.Div(
                                     [
-                                        html.Div(
-                                            [
-                                                html.Label("Bred for", style={"display": "block", "marginBottom": "0.25rem"}),
-                                                dcc.Dropdown(
-                                                    id="filter-bred-for",
-                                                    options=[{"label": "All", "value": "all"}]
-                                                    + [
-                                                        {"label": v, "value": v}
-                                                        for v in sorted(df["bred_for"].dropna().unique())
-                                                        if str(v).strip()
-                                                    ],
-                                                    value="all",
-                                                    clearable=False,
-                                                    style={"minWidth": "150px"},
-                                                ),
+                                        html.Label("Country", style={"display": "block", "marginBottom": "0.25rem"}),
+                                        dcc.Dropdown(
+                                            id="filter-country",
+                                            options=[{"label": "All countries", "value": "all"}]
+                                            + [
+                                                {"label": v, "value": v}
+                                                for v in sorted(df["country_code"].dropna().unique())
+                                                if str(v).strip() and v != "Unknown"
                                             ],
-                                            style={"flex": "1", "marginRight": "1rem"},
-                                        ),
-                                        html.Div(
-                                            [
-                                                html.Label("Breed group", style={"display": "block", "marginBottom": "0.25rem"}),
-                                                dcc.Dropdown(
-                                                    id="filter-breed-group",
-                                                    options=[{"label": "All", "value": "all"}]
-                                                    + [
-                                                        {"label": v, "value": v}
-                                                        for v in sorted(df["breed_group"].dropna().unique())
-                                                        if str(v).strip()
-                                                    ],
-                                                    value="all",
-                                                    clearable=False,
-                                                    style={"minWidth": "150px"},
-                                                ),
-                                            ],
-                                            style={"flex": "1", "marginRight": "1rem"},
-                                        ),
-                                        html.Div(
-                                            [
-                                                html.Label("Country", style={"display": "block", "marginBottom": "0.25rem"}),
-                                                dcc.Dropdown(
-                                                    id="filter-country",
-                                                    options=[{"label": "All", "value": "all"}]
-                                                    + [
-                                                        {"label": v, "value": v}
-                                                        for v in sorted(df["country_code"].dropna().unique())
-                                                        if str(v).strip() and v != "Unknown"
-                                                    ],
-                                                    value="all",
-                                                    clearable=False,
-                                                    style={"minWidth": "150px"},
-                                                ),
-                                            ],
-                                            style={"flex": "1"},
+                                            value="all",
+                                            clearable=False,
+                                            style={"minWidth": "200px"},
                                         ),
                                     ],
-                                    style={"display": "flex", "flexWrap": "wrap", "marginBottom": "1.5rem"},
+                                    style={"marginBottom": "1.5rem"},
                                 ),
                                 dcc.Graph(id="chart-bar", style={"marginBottom": "1.5rem"}),
-                                dcc.Graph(id="chart-pie", style={"marginBottom": "1.5rem"}),
-                                dcc.Graph(id="chart-scatter"),
+                                dcc.Graph(id="chart-pie"),
+                            ],
+                            style={"padding": "1.5rem"},
+                        ),
+                    ],
+                ),
+                dcc.Tab(
+                    label="Explore by Breed Group",
+                    value="explore-group",
+                    children=[
+                        html.Div(
+                            [
+                                html.P(
+                                    "Filter by breed group. View weight vs height by individual breed and life span distribution.",
+                                    style={"marginBottom": "1rem"},
+                                ),
+                                html.Div(
+                                    [
+                                        html.Label("Breed group", style={"display": "block", "marginBottom": "0.25rem"}),
+                                        dcc.Dropdown(
+                                            id="filter-breed-group",
+                                            options=[{"label": "All", "value": "all"}]
+                                            + [
+                                                {"label": v, "value": v}
+                                                for v in sorted(df["breed_group"].dropna().unique())
+                                                if str(v).strip()
+                                            ],
+                                            value="all",
+                                            clearable=False,
+                                            style={"minWidth": "200px"},
+                                        ),
+                                    ],
+                                    style={"marginBottom": "1.5rem"},
+                                ),
+                                dcc.Graph(id="chart-scatter", style={"marginBottom": "1.5rem"}),
+                                dcc.Graph(id="chart-life-span"),
                             ],
                             style={"padding": "1.5rem"},
                         ),
@@ -208,53 +226,57 @@ def update_breed_search(query):
 
 
 @callback(
-    [
-        Output("chart-bar", "figure"),
-        Output("chart-pie", "figure"),
-        Output("chart-scatter", "figure"),
-    ],
-    [
-        Input("filter-bred-for", "value"),
-        Input("filter-breed-group", "value"),
-        Input("filter-country", "value"),
-    ],
+    [Output("chart-bar", "figure"), Output("chart-pie", "figure")],
+    Input("filter-country", "value"),
 )
-def update_charts(bred_for, breed_group, country):
-    filtered = df.copy()
-    if bred_for and bred_for != "all":
-        filtered = filtered[filtered["bred_for"] == bred_for]
-    if breed_group and breed_group != "all":
-        filtered = filtered[filtered["breed_group"] == breed_group]
-    if country and country != "all":
-        filtered = filtered[filtered["country_code"] == country]
+def update_country_charts(country):
+    filtered = df[df["country_code"] == country] if country and country != "all" else df.copy()
+    country_label = country if (country and country != "all") else "All countries"
 
-    # Bar chart: breed count by breed_group
+    # Bar chart: breed count by breed_group (country only)
     group_counts = filtered["breed_group"].value_counts().reset_index()
     group_counts.columns = ["breed_group", "count"]
     fig_bar = px.bar(
         group_counts,
         x="breed_group",
         y="count",
-        title="Number of Breeds by Breed Group",
+        color="breed_group",
+        color_discrete_sequence=PALETTE,
+        title=f"Number of Breeds by Group in {country_label}",
         labels={"breed_group": "Breed Group", "count": "Number of Breeds"},
     )
     fig_bar.update_layout(
         xaxis_tickangle=-45,
         margin=dict(t=50, b=80),
         font=dict(size=12),
+        showlegend=False,
     )
 
-    # Pie chart: distribution by breed_group
+    # Pie chart: distribution by breed_group (country only)
     fig_pie = px.pie(
         filtered,
         names="breed_group",
-        title="Distribution of Breeds by Group",
+        color_discrete_sequence=PALETTE,
+        title=f"Distribution of Breeds by Group in {country_label}",
     )
     fig_pie.update_traces(textposition="inside", textinfo="percent+label")
     fig_pie.update_layout(margin=dict(t=50, b=20), font=dict(size=12))
 
-    # Scatter: metric_weight vs metric_height
-    filtered = filtered.copy()
+    return fig_bar, fig_pie
+
+
+@callback(
+    [Output("chart-scatter", "figure"), Output("chart-life-span", "figure")],
+    Input("filter-breed-group", "value"),
+)
+def update_breed_group_charts(breed_group):
+    filtered = (
+        df[df["breed_group"] == breed_group].copy()
+        if breed_group and breed_group != "all"
+        else df.copy()
+    )
+
+    # Scatter: weight vs height by individual breeds
     filtered["weight_mid"] = filtered["metric_weight"].apply(parse_metric_to_midpoint)
     filtered["height_mid"] = filtered["metric_height"].apply(parse_metric_to_midpoint)
     scatter_df = filtered.dropna(subset=["weight_mid", "height_mid"])
@@ -269,24 +291,76 @@ def update_charts(bred_for, breed_group, country):
             showarrow=False,
             font=dict(size=14),
         )
-        fig_scatter.update_layout(title="Weight vs Height (metric)")
+        fig_scatter.update_layout(
+            title="Weight vs Height by Breed (metric)",
+            xaxis_title="Weight (kg)",
+            yaxis_title="Height (cm)",
+        )
     else:
         fig_scatter = px.scatter(
             scatter_df,
             x="weight_mid",
             y="height_mid",
             color="breed_group",
-            hover_data=["name"],
+            color_discrete_sequence=PALETTE,
+            hover_data=["name", "breed_group"],
             title="Weight vs Height by Breed (metric)",
             labels={"weight_mid": "Weight (kg)", "height_mid": "Height (cm)"},
         )
         fig_scatter.update_layout(
             margin=dict(t=50, b=60),
             font=dict(size=12),
+        )
+
+    # Life span chart: breeds on y, life span range (min-max) on x
+    life_df = filtered.copy()
+    life_df["life_span_range"] = life_df["life_span"].apply(parse_life_span_range)
+    life_df = life_df.dropna(subset=["life_span_range"])
+    if life_df.empty:
+        fig_life = go.Figure()
+        fig_life.add_annotation(
+            text="No life span data available for filtered breeds.",
+            xref="paper",
+            yref="paper",
+            x=0.5,
+            y=0.5,
+            showarrow=False,
+            font=dict(size=14),
+        )
+        fig_life.update_layout(title="Life Span by Breed")
+    else:
+        life_df["life_min"] = life_df["life_span_range"].apply(lambda r: r[0])
+        life_df["life_max"] = life_df["life_span_range"].apply(lambda r: r[1])
+        life_df = life_df.sort_values("life_min", ascending=False)
+        groups = life_df["breed_group"].unique()
+        color_map = {g: PALETTE[i % len(PALETTE)] for i, g in enumerate(groups)}
+        fig_life = go.Figure()
+        for group in groups:
+            sub = life_df[life_df["breed_group"] == group]
+            fig_life.add_trace(
+                go.Bar(
+                    x=sub["life_max"] - sub["life_min"],
+                    y=sub["name"],
+                    base=sub["life_min"],
+                    orientation="h",
+                    name=group,
+                    marker_color=color_map[group],
+                    hovertemplate="%{y}<br>Life span: %{base:.1f}–%{customdata:.1f} years<extra></extra>",
+                    customdata=sub["life_max"],
+                )
+            )
+        fig_life.update_layout(
+            title="Life Span by Breed",
+            xaxis_title="Life Span (years)",
+            yaxis_title="Breed",
+            margin=dict(t=50, b=60, l=120),
+            font=dict(size=12),
+            yaxis=dict(autorange="reversed"),
+            showlegend=len(groups) > 1,
             legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
         )
 
-    return fig_bar, fig_pie, fig_scatter
+    return fig_scatter, fig_life
 
 
 if __name__ == "__main__":
